@@ -215,7 +215,72 @@ class GraphBuilderService:
             if attr_name.lower() in RESERVED_NAMES:
                 return f"entity_{attr_name}"
             return attr_name
-        
+
+        import re as _re_ont
+
+        def _slug_to_pascal_base(raw: str) -> str:
+            """Alphanumeric PascalCase segments from any label (Zep type names)."""
+            parts = [p for p in _re_ont.split(r"[^A-Za-z0-9]+", (raw or "").strip()) if p]
+            if not parts:
+                return ""
+            return "".join(p[0].upper() + p[1:].lower() for p in parts)
+
+        def _allocate_zep_type_name(base: str, used: set) -> str:
+            if not base or not base[0].isalpha():
+                base = "Type"
+            cand = base
+            n = 2
+            while cand in used:
+                cand = f"{base}{n}"
+                n += 1
+            used.add(cand)
+            return cand
+
+        _pre_entity_names = [str(x.get("name", "")) for x in ontology.get("entity_types", [])]
+        _pre_edge_names = [str(x.get("name", "")) for x in ontology.get("edge_types", [])]
+
+        _zep_used: set = set()
+        _entity_map: Dict[str, str] = {}
+        for _i, _edef in enumerate(ontology.get("entity_types", [])):
+            _old = str(_edef.get("name", "") or "")
+            _base = _slug_to_pascal_base(_old)
+            if not _base:
+                _base = f"EntityType{_i}"
+            _new = _allocate_zep_type_name(_base, _zep_used)
+            _entity_map[_old] = _new
+            _edef["name"] = _new
+
+        _edge_map: Dict[str, str] = {}
+        for _i, _gdef in enumerate(ontology.get("edge_types", [])):
+            _old = str(_gdef.get("name", "") or "")
+            _base = _slug_to_pascal_base(_old)
+            if not _base:
+                _base = f"RelationType{_i}"
+            _new = _allocate_zep_type_name(_base, _zep_used)
+            _edge_map[_old] = _new
+            _gdef["name"] = _new
+
+        _new_entity_values = set(_entity_map.values())
+
+        def _resolve_st_endpoint(label: str) -> str:
+            _s = str(label or "")
+            if _s in _entity_map:
+                return _entity_map[_s]
+            _c = _slug_to_pascal_base(_s)
+            for _old, _new in _entity_map.items():
+                if _slug_to_pascal_base(_old) == _c:
+                    return _new
+            if _s in _new_entity_values:
+                return _s
+            return next(iter(_new_entity_values)) if _new_entity_values else "Person"
+
+        for _gdef in ontology.get("edge_types", []):
+            for _st in _gdef.get("source_targets") or []:
+                if "source" in _st:
+                    _st["source"] = _resolve_st_endpoint(_st.get("source", ""))
+                if "target" in _st:
+                    _st["target"] = _resolve_st_endpoint(_st.get("target", ""))
+
         # 动态创建实体类型
         entity_types = {}
         for entity_def in ontology.get("entity_types", []):
@@ -277,6 +342,60 @@ class GraphBuilderService:
             if source_targets:
                 edge_definitions[name] = (edge_class, source_targets)
         
+        # #region agent log
+        try:
+            import json as _agent_json
+            import re as _agent_re
+
+            def _agent_name_classify(n: str) -> str:
+                if not n:
+                    return "empty"
+                if _agent_re.search(r"[^A-Za-z0-9]", n):
+                    return "has_non_alphanumeric"
+                if n[0].islower():
+                    return "starts_lowercase"
+                return "ascii_alnum_only"
+
+            _raw_e = list(_pre_entity_names)
+            _raw_ed = list(_pre_edge_names)
+            _st_refs = []
+            for ed in ontology.get("edge_types", []):
+                for st in ed.get("source_targets") or []:
+                    _st_refs.append(
+                        {"source": str(st.get("source", "")), "target": str(st.get("target", ""))}
+                    )
+            _row = {
+                "sessionId": "f1ba5c",
+                "timestamp": int(time.time() * 1000),
+                "location": "graph_builder.set_ontology",
+                "message": "before_zep_set_ontology",
+                "hypothesisId": "H1-H3",
+                "runId": "post-fix",
+                "data": {
+                    "pre_entity_names": _pre_entity_names,
+                    "pre_edge_names": _pre_edge_names,
+                    "raw_entity_names": _raw_e,
+                    "raw_edge_names": _raw_ed,
+                    "entity_classify": {n: _agent_name_classify(n) for n in _raw_e},
+                    "edge_classify": {n: _agent_name_classify(n) for n in _raw_ed},
+                    "entity_rename_map": dict(_entity_map),
+                    "edge_rename_map": dict(_edge_map),
+                    "built_entity_keys": list(entity_types.keys()),
+                    "built_edge_keys": list(edge_definitions.keys()),
+                    "post_entity_classify": {
+                        n: _agent_name_classify(n) for n in entity_types.keys()
+                    },
+                    "source_target_sample": _st_refs[:24],
+                },
+            }
+            with open(
+                "/Users/mac/Documents/GitHub/MiroFish-en/.cursor/debug-f1ba5c.log", "a", encoding="utf-8"
+            ) as _af:
+                _af.write(_agent_json.dumps(_row) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
         # 调用Zep API设置本体
         if entity_types or edge_definitions:
             self.client.graph.set_ontology(

@@ -4,8 +4,153 @@
 """
 
 import json
+import re
 from typing import Dict, Any, List, Optional
 from ..utils.llm_client import LLMClient
+
+
+_ENTITY_NAME_KEYS = (
+    "name",
+    "type",
+    "label",
+    "entity_type",
+    "english_name",
+    "class_name",
+    "title",
+)
+_EDGE_NAME_KEYS = (
+    "name",
+    "type",
+    "label",
+    "relation",
+    "relation_type",
+    "edge_type",
+    "relationship",
+)
+_NAME_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "for",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "any",
+        "who",
+        "can",
+        "that",
+        "this",
+        "with",
+        "from",
+        "as",
+        "is",
+        "are",
+        "be",
+        "their",
+        "they",
+        "by",
+        "not",
+        "may",
+        "must",
+        "each",
+        "all",
+        "when",
+        "used",
+        "using",
+        "type",
+        "entity",
+        "role",
+        "one",
+        "other",
+    }
+)
+
+
+def _extract_pascal_identifier(text: str, max_words: int = 3) -> str:
+    """Build PascalCase from English tokens in arbitrary text (Zep-friendly)."""
+    if not text or not isinstance(text, str):
+        return ""
+    words = re.findall(r"[A-Za-z][a-zA-Z0-9]*", text)
+    parts: List[str] = []
+    for w in words:
+        lw = w.lower()
+        if lw in _NAME_STOPWORDS:
+            continue
+        parts.append(w[0].upper() + w[1:].lower() if len(w) > 1 else w.upper())
+        if len(parts) >= max_words:
+            break
+    return "".join(parts)
+
+
+def _extract_upper_snake_identifier(text: str, max_words: int = 3) -> str:
+    """Build UPPER_SNAKE_CASE from English tokens for edge type names."""
+    if not text or not isinstance(text, str):
+        return ""
+    words = re.findall(r"[A-Za-z][a-zA-Z0-9]*", text)
+    parts: List[str] = []
+    for w in words:
+        lw = w.lower()
+        if lw in _NAME_STOPWORDS:
+            continue
+        parts.append(lw.upper())
+        if len(parts) >= max_words:
+            break
+    return "_".join(parts)
+
+
+def _first_string_example(examples: Any) -> str:
+    if not isinstance(examples, list):
+        return ""
+    for e in examples:
+        if isinstance(e, str) and e.strip():
+            return e.strip()
+    return ""
+
+
+def _coerce_ontology_item_name(item: Dict[str, Any], kind: str, index: int) -> str:
+    """
+    Resolve a non-empty type name. The LLM often omits `name` but fills
+    description/examples or uses alternate keys (`type`, `label`, ...).
+    """
+    is_entity = kind == "Entity"
+    keys = _ENTITY_NAME_KEYS if is_entity else _EDGE_NAME_KEYS
+    for key in keys:
+        raw = item.get(key)
+        if isinstance(raw, str):
+            s = raw.strip()
+            if s:
+                return s
+
+    ex = _first_string_example(item.get("examples"))
+    if ex:
+        if is_entity:
+            inferred = _extract_pascal_identifier(ex, max_words=2)
+            if len(inferred) >= 3:
+                return inferred
+        else:
+            inferred = _extract_upper_snake_identifier(ex, max_words=3)
+            if len(inferred) >= 4:
+                return inferred
+
+    desc = item.get("description", "")
+    if isinstance(desc, str) and desc.strip():
+        if is_entity:
+            inferred = _extract_pascal_identifier(desc, max_words=3)
+            if len(inferred) >= 4:
+                return inferred
+        else:
+            inferred = _extract_upper_snake_identifier(desc, max_words=3)
+            if len(inferred) >= 4:
+                return inferred
+
+    if is_entity:
+        return f"InferredEntityType{index + 1}"
+    return f"INFERRED_RELATION_{index + 1}"
 
 
 # 本体生成的系统提示词
@@ -71,6 +216,13 @@ ONTOLOGY_SYSTEM_PROMPT = """你是一个专业的知识图谱本体设计专家�
 ```
 
 ## 设计指南（极其重要！）
+
+### 0. 命名规则（极其重要，勿省略）
+
+- `entity_types` 与 `edge_types` 中的**每一条**都必须包含 JSON 字段 **`name`**（键名必须完全一致）。禁止只用 `type`、`label`、中文标题或 description 代替标识符。
+- 每个 `name` 必须是**可读、可理解的英文**：例如 `NationalFilmAgency`、`PublishingCompany`。禁止：空字符串、纯空白、`Type1`、`CategoryA`、`Unnamed*` 等占位符。
+- 前 8 个实体类型应来自**文档与模拟需求中真实出现或隐含的角色/机构类别**，避免空洞的泛化桶。
+- 关系类型的 `name` 必须为 **UPPER_SNAKE_CASE**，且语义清晰（如 `HAS_PUBLICATION_RIGHTS`），禁止 `REL1` 这类占位。
 
 ### 1. 实体类型设计 - 必须严格遵守
 
@@ -216,6 +368,13 @@ Please output in JSON format with the following structure:
 ```
 
 ## Design Guidelines (Extremely Important!)
+
+### 0. Naming Rules (Critical — Do Not Skip)
+
+- Every entry in `entity_types` and `edge_types` MUST include a JSON field **`name`** (exact key spelling). Do not use only `type`, `label`, non-English titles, or `description` alone as the identifier.
+- Each `name` must be **human-meaningful English**: e.g. `NationalFilmAgency`, `PublishingCompany`. Forbidden: empty string, whitespace-only, `Type1`, `CategoryA`, `Unnamed*`, or other placeholders.
+- The first 8 entity types should name **concrete actor categories** grounded in the documents and simulation brief (institutions, professions, venues), not empty generic buckets.
+- Each relationship `name` must be **UPPER_SNAKE_CASE** and descriptive (e.g. `HAS_PUBLICATION_RIGHTS`), not `REL1` or similar placeholders.
 
 ### 1. Entity Type Design - Must Be Strictly Followed
 
@@ -405,6 +564,7 @@ Based on the above content, design entity types and relationship types suitable 
 3. The first 8 are specific types designed based on the text content
 4. All entity types must be real-world agents that can speak on social media, not abstract concepts
 5. Attribute names cannot use reserved words like name, uuid, group_id; use full_name, org_name, etc. instead
+6. Every entity_types[i] and edge_types[i] object MUST include a non-empty, meaningful English `name` (PascalCase for entities, UPPER_SNAKE_CASE for edges). Never omit `name` or leave it blank.
 """
         else:
             message = f"""## 模拟需求
@@ -432,6 +592,7 @@ Based on the above content, design entity types and relationship types suitable 
 3. 前8个是根据文本内容设计的具体类型
 4. 所有实体类型必须是现实中可以发声的主体，不能是抽象概念
 5. 属性名不能使用 name、uuid、group_id 等保留字，用 full_name、org_name 等替代
+6. 每个 entity_types 与 edge_types 对象必须包含非空且有语义的英文 `name`（实体用 PascalCase，关系用 UPPER_SNAKE_CASE），禁止省略或留空
 """
 
         return message
@@ -447,10 +608,7 @@ Based on the above content, design entity types and relationship types suitable 
         for i, item in enumerate(items or []):
             if not isinstance(item, dict):
                 continue
-            raw = item.get("name")
-            name = raw.strip() if isinstance(raw, str) else ""
-            if not name:
-                name = f"Unnamed_{kind}_{i + 1}"
+            name = _coerce_ontology_item_name(item, kind, i)
             normalized.append({**item, "name": name})
         return normalized
 
