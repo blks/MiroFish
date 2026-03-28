@@ -261,6 +261,18 @@ def generate_ontology():
             "error": msg("llm_auth_failed"),
         }), 401
 
+    except KeyError as e:
+        missing = e.args[0] if e.args else "unknown"
+        logger.exception("Ontology generation failed: missing key %r in structured data", missing)
+        return jsonify({
+            "success": False,
+            "error": (
+                f"Ontology data is missing required field {missing!r} "
+                "(often invalid or incomplete LLM JSON). Check server logs."
+            ),
+            "traceback": traceback.format_exc()
+        }), 500
+
     except Exception as e:
         return jsonify({
             "success": False,

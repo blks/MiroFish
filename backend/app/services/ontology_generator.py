@@ -436,6 +436,24 @@ Based on the above content, design entity types and relationship types suitable 
 
         return message
     
+    def _normalize_ontology_items(
+        self, items: List[Any], kind: str
+    ) -> List[Dict[str, Any]]:
+        """
+        LLM JSON may omit 'name' on entity_types / edge_types entries, which would
+        raise KeyError later. Coerce to dicts with a non-empty name.
+        """
+        normalized: List[Dict[str, Any]] = []
+        for i, item in enumerate(items or []):
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("name")
+            name = raw.strip() if isinstance(raw, str) else ""
+            if not name:
+                name = f"Unnamed_{kind}_{i + 1}"
+            normalized.append({**item, "name": name})
+        return normalized
+
     def _validate_and_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """验证和后处理结果"""
         
@@ -446,6 +464,13 @@ Based on the above content, design entity types and relationship types suitable 
             result["edge_types"] = []
         if "analysis_summary" not in result:
             result["analysis_summary"] = ""
+
+        result["entity_types"] = self._normalize_ontology_items(
+            result["entity_types"], "Entity"
+        )
+        result["edge_types"] = self._normalize_ontology_items(
+            result["edge_types"], "Relation"
+        )
         
         # 验证实体类型
         for entity in result["entity_types"]:

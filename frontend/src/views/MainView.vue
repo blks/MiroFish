@@ -49,17 +49,32 @@
 
       <!-- Right Panel: Step Components -->
       <div class="panel-wrapper right" :style="rightPanelStyle">
-        <!-- Step 1: 图谱构建 -->
-        <Step1GraphBuild 
+        <!-- Step 1: 图谱构建 (logs are sibling of workbench, not inside scroll area) -->
+        <div v-if="currentStep === 1" class="right-panel-step1">
+          <Step1GraphBuild 
+            :currentPhase="currentPhase"
+            :projectData="projectData"
+            :ontologyProgress="ontologyProgress"
+            :buildProgress="buildProgress"
+            :graphData="graphData"
+            @next-step="handleNextStep"
+          />
+        </div>
+        <div
           v-if="currentStep === 1"
-          :currentPhase="currentPhase"
-          :projectData="projectData"
-          :ontologyProgress="ontologyProgress"
-          :buildProgress="buildProgress"
-          :graphData="graphData"
-          :systemLogs="systemLogs"
-          @next-step="handleNextStep"
-        />
+          class="log-content"
+        >
+          <div class="log-header">
+            <span class="log-title">SYSTEM DASHBOARD</span>
+            <span class="log-id">{{ projectData?.project_id || 'NO_PROJECT' }}</span>
+          </div>
+          <div class="log-scroll" ref="logScrollArea">
+            <div class="log-line" v-for="(log, idx) in systemLogs" :key="idx">
+              <span class="log-time">{{ log.time }}</span>
+              <span class="log-msg">{{ log.msg }}</span>
+            </div>
+          </div>
+        </div>
         <!-- Step 2: 环境搭建 -->
         <Step2EnvSetup
           v-else-if="currentStep === 2"
@@ -76,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
@@ -108,6 +123,40 @@ const currentPhase = ref(-1) // -1: Upload, 0: Ontology, 1: Build, 2: Complete
 const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const systemLogs = ref([])
+const logScrollArea = ref(null)
+
+/** User-visible error text; expands opaque API / KeyError messages */
+const formatClientError = (err) => {
+  if (!err) return 'Unknown error'
+  const raw = (err.message != null ? err.message : String(err)).trim()
+  const apiBody = err.response?.data
+  if (apiBody && typeof apiBody === 'object') {
+    const fromApi = apiBody.error ?? apiBody.message
+    if (fromApi != null && String(fromApi).trim()) {
+      return String(fromApi).trim()
+    }
+  }
+  const dequoted = raw.replace(/^['"]|['"]$/g, '')
+  if (dequoted === 'name') {
+    return (
+      'Ontology JSON from the model was missing a required "name" on an entity or relation type. ' +
+      'Retry generation; if it persists, check server logs or LLM output format.'
+    )
+  }
+  return raw || 'Unknown error'
+}
+
+watch(
+  () => systemLogs.value.length,
+  () => {
+    nextTick(() => {
+      const el = logScrollArea.value
+      if (el) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+  }
+)
 
 // Polling timers
 let pollTimer = null
@@ -219,12 +268,18 @@ const handleNewProject = async () => {
       addLog(`Ontology generated successfully for project ${res.data.project_id}`)
       await startBuildGraph()
     } else {
-      error.value = res.error || 'Ontology generation failed'
-      addLog(`Error generating ontology: ${error.value}`)
+      const msgText = res.error || res.message || 'Ontology generation failed'
+      error.value = msgText
+      addLog(`Error generating ontology: ${msgText}`)
+      currentPhase.value = -1
+      ontologyProgress.value = null
     }
   } catch (err) {
-    error.value = err.message
-    addLog(`Exception in handleNewProject: ${err.message}`)
+    const detail = formatClientError(err)
+    error.value = detail
+    addLog(`Exception in handleNewProject: ${detail}`)
+    currentPhase.value = -1
+    ontologyProgress.value = null
   } finally {
     loading.value = false
   }
@@ -540,5 +595,77 @@ onUnmounted(() => {
 
 .panel-wrapper.left {
   border-right: 1px solid #EAEAEA;
+}
+
+.panel-wrapper.right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.right-panel-step1 {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #fafafa;
+}
+
+/* Direct child of .panel-wrapper.right: dashboard shell + scrollable lines */
+.log-content {
+  background: #000;
+  color: #ddd;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  border-top: 1px solid #222;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #333;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: #888;
+}
+
+.log-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 80px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.log-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.log-scroll::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+.log-line {
+  font-size: 11px;
+  display: flex;
+  gap: 12px;
+  line-height: 1.5;
+}
+
+.log-time {
+  color: #666;
+  min-width: 75px;
+}
+
+.log-msg {
+  color: #ccc;
+  word-break: break-all;
 }
 </style>
