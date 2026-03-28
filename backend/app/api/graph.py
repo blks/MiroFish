@@ -7,6 +7,7 @@ import os
 import traceback
 import threading
 from flask import request, jsonify
+from openai import AuthenticationError
 
 from . import graph_bp
 from ..config import Config
@@ -247,6 +248,19 @@ def generate_ontology():
             }
         })
         
+    except AuthenticationError as e:
+        logger.warning("LLM authentication failed during ontology generation: %s", e)
+        proj = locals().get("project")
+        if proj is not None and getattr(proj, "project_id", None):
+            try:
+                ProjectManager.delete_project(proj.project_id)
+            except Exception:
+                pass
+        return jsonify({
+            "success": False,
+            "error": msg("llm_auth_failed"),
+        }), 401
+
     except Exception as e:
         return jsonify({
             "success": False,

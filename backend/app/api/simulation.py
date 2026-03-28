@@ -471,6 +471,9 @@ def prepare_simulation():
         entity_types_list = data.get('entity_types')
         use_llm_for_profiles = data.get('use_llm_for_profiles', True)
         parallel_profile_count = data.get('parallel_profile_count', 5)
+        # Capture before background thread (Flask request context not available in worker)
+        prepare_language = get_request_language()
+        logger.info(f"prepare simulation language (Accept-Language): {prepare_language}")
         
         # ========== 同步获取实体数量（在后台任务启动前） ==========
         # 这样前端在调用prepare后立即就能获取到预期Agent总数
@@ -505,8 +508,8 @@ def prepare_simulation():
         state.status = SimulationStatus.PREPARING
         manager._save_simulation_state(state)
         
-        # 定义后台任务
-        def run_prepare():
+        # 定义后台任务 (default arg freezes prepare_language for thread safety)
+        def run_prepare(lang=prepare_language):
             try:
                 task_manager.update_task(
                     task_id,
@@ -587,7 +590,8 @@ def prepare_simulation():
                     defined_entity_types=entity_types_list,
                     use_llm_for_profiles=use_llm_for_profiles,
                     progress_callback=progress_callback,
-                    parallel_profile_count=parallel_profile_count
+                    parallel_profile_count=parallel_profile_count,
+                    language=lang,
                 )
                 
                 # 任务完成
@@ -910,7 +914,7 @@ def get_simulation_history():
     """
     try:
         limit = request.args.get('limit', 20, type=int)
-        
+
         manager = SimulationManager()
         simulations = manager.list_simulations()[:limit]
         
@@ -1414,7 +1418,7 @@ def generate_profiles():
                 "error": "没有找到符合条件的实体"
             }), 400
         
-        generator = OasisProfileGenerator()
+        generator = OasisProfileGenerator(language=get_request_language())
         profiles = generator.generate_profiles_from_entities(
             entities=filtered.entities,
             use_llm=use_llm
@@ -2228,7 +2232,7 @@ def interview_agent():
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
-                "error": "模拟环境未运行或已关闭。请确保模拟已完成并进入等待命令模式。"
+                "error": msg('interview_env_not_running')
             }), 400
         
         # 优化prompt，添加前缀避免Agent调用工具
@@ -2363,7 +2367,7 @@ def interview_agents_batch():
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
-                "error": "模拟环境未运行或已关闭。请确保模拟已完成并进入等待命令模式。"
+                "error": msg('interview_env_not_running')
             }), 400
 
         # 优化每个采访项的prompt，添加前缀避免Agent调用工具
@@ -2470,7 +2474,7 @@ def interview_all_agents():
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
-                "error": "模拟环境未运行或已关闭。请确保模拟已完成并进入等待命令模式。"
+                "error": msg('interview_env_not_running')
             }), 400
 
         # 优化prompt，添加前缀避免Agent调用工具

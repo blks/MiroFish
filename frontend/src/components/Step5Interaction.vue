@@ -292,7 +292,7 @@
             <textarea 
               v-model="chatInput"
               class="chat-input"
-              placeholder="输入您的问题..."
+              :placeholder="$t('step5.chatInputPlaceholder')"
               @keydown.enter.exact.prevent="sendMessage"
               :disabled="isSending || (!selectedAgent && chatTarget === 'agent')"
               rows="1"
@@ -412,8 +412,11 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { chatWithReport, getReport, getAgentLog } from '../api/report'
 import { interviewAgents, getSimulationProfilesRealtime } from '../api/simulation'
+
+const { t } = useI18n()
 
 const props = defineProps({
   reportId: String,
@@ -662,10 +665,10 @@ const sendMessage = async () => {
       await sendToAgent(message)
     }
   } catch (err) {
-    addLog(`发送失败: ${err.message}`)
+    addLog(t('step5.chatSendFailed', { detail: err.message }))
     chatHistory.value.push({
       role: 'assistant',
-      content: `抱歉，发生了错误: ${err.message}`,
+      content: t('step5.chatErrorDetail', { detail: err.message }),
       timestamp: new Date().toISOString()
     })
   } finally {
@@ -697,18 +700,18 @@ const sendToReportAgent = async (message) => {
   if (res.success && res.data) {
     chatHistory.value.push({
       role: 'assistant',
-      content: res.data.response || res.data.answer || '无响应',
+      content: res.data.response || res.data.answer || t('step5.noResponse'),
       timestamp: new Date().toISOString()
     })
     addLog('Report Agent 已回复')
   } else {
-    throw new Error(res.error || '请求失败')
+    throw new Error(res.error || t('step5.requestFailed'))
   }
 }
 
 const sendToAgent = async (message) => {
   if (!selectedAgent.value || selectedAgentIndex.value === null) {
-    throw new Error('请先选择一个模拟个体')
+    throw new Error(t('step5.selectAgentFirst'))
   }
   
   addLog(`向 ${selectedAgent.value.username} 发送: ${message.substring(0, 50)}...`)
@@ -763,10 +766,10 @@ const sendToAgent = async (message) => {
       })
       addLog(`${selectedAgent.value.username} 已回复`)
     } else {
-      throw new Error('无响应数据')
+      throw new Error(t('step5.noResponseData'))
     }
   } else {
-    throw new Error(res.error || '请求失败')
+    throw new Error(res.error || t('step5.requestFailed'))
   }
 }
 

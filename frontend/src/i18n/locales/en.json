@@ -292,7 +292,14 @@
       "quickSearch": "QuickSearch Fast Retrieval",
       "quickSearchDesc": "GraphRAG-based instant query interface with optimized indexing for fast extraction of specific node attributes and discrete facts"
     },
-    "generating": "Generating {title}..."
+    "generating": "Generating {title}...",
+    "chatInputPlaceholder": "Type your question...",
+    "chatErrorDetail": "Sorry, an error occurred: {detail}",
+    "chatSendFailed": "Send failed: {detail}",
+    "selectAgentFirst": "Please select a simulated individual first",
+    "requestFailed": "Request failed",
+    "noResponse": "No response",
+    "noResponseData": "No response data"
   },
   "graph": {
     "refreshBtn": "Refresh Graph",

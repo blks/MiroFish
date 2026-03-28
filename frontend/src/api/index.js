@@ -37,6 +37,15 @@ service.interceptors.response.use(
   },
   error => {
     console.error('Response error:', error)
+
+    const data = error.response?.data
+    const serverMsg =
+      data && typeof data === 'object' && (data.error ?? data.message)
+    if (serverMsg) {
+      const wrapped = new Error(String(serverMsg))
+      wrapped.response = error.response
+      return Promise.reject(wrapped)
+    }
     
     // 处理超时
     if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
@@ -58,6 +67,10 @@ export const requestWithRetry = async (requestFn, maxRetries = 3, delay = 1000) 
     try {
       return await requestFn()
     } catch (error) {
+      const status = error.response?.status
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw error
+      }
       if (i === maxRetries - 1) throw error
       
       console.warn(`Request failed, retrying (${i + 1}/${maxRetries})...`)

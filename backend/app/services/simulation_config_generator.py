@@ -390,11 +390,21 @@ class SimulationConfigGenerator:
         # 实体摘要
         entity_summary = self._summarize_entities(entities)
         
-        # 构建上下文
-        context_parts = [
-            f"## 模拟需求\n{simulation_requirement}",
-            f"\n## 实体信息 ({len(entities)}个)\n{entity_summary}",
-        ]
+        # 构建上下文（标题语言与生成语言一致，便于 LLM 对齐输出语言）
+        if self.language == 'en':
+            context_parts = [
+                f"## Simulation requirement\n{simulation_requirement}",
+                f"\n## Entities ({len(entities)})\n{entity_summary}",
+            ]
+            trunc_suffix = "\n...(document truncated)"
+            doc_heading = "\n## Source document\n"
+        else:
+            context_parts = [
+                f"## 模拟需求\n{simulation_requirement}",
+                f"\n## 实体信息 ({len(entities)}个)\n{entity_summary}",
+            ]
+            trunc_suffix = "\n...(文档已截断)"
+            doc_heading = "\n## 原始文档内容\n"
         
         current_length = sum(len(p) for p in context_parts)
         remaining_length = self.MAX_CONTEXT_LENGTH - current_length - 500  # 留500字符余量
@@ -402,8 +412,8 @@ class SimulationConfigGenerator:
         if remaining_length > 0 and document_text:
             doc_text = document_text[:remaining_length]
             if len(document_text) > remaining_length:
-                doc_text += "\n...(文档已截断)"
-            context_parts.append(f"\n## 原始文档内容\n{doc_text}")
+                doc_text += trunc_suffix
+            context_parts.append(f"{doc_heading}{doc_text}")
         
         return "\n".join(context_parts)
     
@@ -420,7 +430,10 @@ class SimulationConfigGenerator:
             by_type[t].append(e)
         
         for entity_type, type_entities in by_type.items():
-            lines.append(f"\n### {entity_type} ({len(type_entities)}个)")
+            if self.language == 'en':
+                lines.append(f"\n### {entity_type} ({len(type_entities)})")
+            else:
+                lines.append(f"\n### {entity_type} ({len(type_entities)}个)")
             # 使用配置的显示数量和摘要长度
             display_count = self.ENTITIES_PER_TYPE_DISPLAY
             summary_len = self.ENTITY_SUMMARY_LENGTH
@@ -428,7 +441,11 @@ class SimulationConfigGenerator:
                 summary_preview = (e.summary[:summary_len] + "...") if len(e.summary) > summary_len else e.summary
                 lines.append(f"- {e.name}: {summary_preview}")
             if len(type_entities) > display_count:
-                lines.append(f"  ... 还有 {len(type_entities) - display_count} 个")
+                rest = len(type_entities) - display_count
+                if self.language == 'en':
+                    lines.append(f"  ... {rest} more")
+                else:
+                    lines.append(f"  ... 还有 {rest} 个")
         
         return "\n".join(lines)
     
@@ -541,7 +558,50 @@ class SimulationConfigGenerator:
         # 计算最大允许值（80%的agent数）
         max_agents_allowed = max(1, int(num_entities * 0.9))
         
-        prompt = f"""基于以下模拟需求，生成时间模拟配置。
+        if self.language == 'en':
+            prompt = f"""Based on the simulation scenario below, produce a **time simulation configuration** as JSON.
+
+{context_truncated}
+
+## Task
+Return a single JSON object. Adapt hour bands to the scenario's implied geography and participating groups (e.g. students active late evening; media spread across the day; institutions mainly office hours). Use integers 0-23 for all hour lists.
+
+### Guidelines (tune to the event; these are typical defaults)
+- Dead night (e.g. 0-5): very low activity (~0.05)
+- Early morning (e.g. 6-8): ramp-up (~0.4)
+- Work hours (e.g. 9-18): moderate (~0.7)
+- Evening peak (e.g. 19-22): highest (~1.5)
+- Late night (e.g. 23): declining (~0.5)
+- Breaking news may shorten off_peak_hours; students may shift peak later.
+
+### Return JSON only (no markdown)
+
+Example:
+{{
+    "total_simulation_hours": 72,
+    "minutes_per_round": 60,
+    "agents_per_hour_min": 5,
+    "agents_per_hour_max": 50,
+    "peak_hours": [19, 20, 21, 22],
+    "off_peak_hours": [0, 1, 2, 3, 4, 5],
+    "morning_hours": [6, 7, 8],
+    "work_hours": [9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    "reasoning": "Brief English explanation of this schedule"
+}}
+
+Fields:
+- total_simulation_hours (int): 24-168; shorter for sudden events, longer for prolonged issues
+- minutes_per_round (int): 30-120, typically 60
+- agents_per_hour_min (int): min agents activated per hour (1-{max_agents_allowed})
+- agents_per_hour_max (int): max agents activated per hour (1-{max_agents_allowed})
+- peak_hours, off_peak_hours, morning_hours, work_hours: arrays of ints 0-23
+- reasoning (string): **must be written in English**"""
+            system_prompt = (
+                "You are a social media simulation expert. Return pure JSON only. "
+                "The reasoning field must be in English."
+            )
+        else:
+            prompt = f"""基于以下模拟需求，生成时间模拟配置。
 
 {context_truncated}
 
@@ -585,10 +645,6 @@ class SimulationConfigGenerator:
 - morning_hours (int数组): 早间时段
 - work_hours (int数组): 工作时段
 - reasoning (string): 简要说明为什么这样配置"""
-
-        if self.language == 'en':
-            system_prompt = "You are a social media simulation expert. Return pure JSON format."
-        else:
             system_prompt = "你是社交媒体模拟专家。返回纯JSON格式，时间配置需符合中国人作息习惯。"
 
         try:
@@ -676,7 +732,44 @@ class SimulationConfigGenerator:
         # 使用配置的上下文截断长度
         context_truncated = context[:self.EVENT_CONFIG_CONTEXT_LENGTH]
         
-        prompt = f"""基于以下模拟需求，生成事件配置。
+        if self.language == 'en':
+            prompt = f"""Generate an **event configuration** for the simulation below.
+
+Simulation requirement: {simulation_requirement}
+
+{context_truncated}
+
+## Available entity types and examples
+{type_info}
+
+## Task
+Produce JSON with:
+- Hot-topic keywords
+- Narrative direction for how public discourse may evolve
+- Initial posts; **each post must include poster_type** (publisher entity type)
+
+**Critical:** `poster_type` must be chosen **exactly** from the available entity types above so posts can be routed to the right agents.
+Examples: official statements → Official/University/GovernmentAgency; news → MediaOutlet; individual takes → Student/Person as appropriate.
+
+**Language:** All human-readable strings in the JSON must be **in English**: `hot_topics`, `narrative_direction`, each `initial_posts[].content`, and `reasoning`. Hashtags in post content may stay ASCII.
+
+Return JSON only (no markdown):
+{{
+    "hot_topics": ["keyword1", "keyword2", ...],
+    "narrative_direction": "<English description>",
+    "initial_posts": [
+        {{"content": "<English post text>", "poster_type": "<exact type from list>"}},
+        ...
+    ],
+    "reasoning": "<brief English explanation>"
+}}"""
+            system_prompt = (
+                "You are a public opinion analysis expert. Return pure JSON only. "
+                "poster_type must exactly match one of the given entity types. "
+                "All user-facing text fields must be English."
+            )
+        else:
+            prompt = f"""基于以下模拟需求，生成事件配置。
 
 模拟需求: {simulation_requirement}
 
@@ -704,10 +797,6 @@ class SimulationConfigGenerator:
     ],
     "reasoning": "<简要说明>"
 }}"""
-
-        if self.language == 'en':
-            system_prompt = "You are a public opinion analysis expert. Return pure JSON format. Note that poster_type must exactly match available entity types."
-        else:
             system_prompt = "你是舆论分析专家。返回纯JSON格式。注意 poster_type 必须精确匹配可用实体类型。"
 
         try:
@@ -835,13 +924,56 @@ class SimulationConfigGenerator:
                 "summary": e.summary[:summary_len] if e.summary else ""
             })
         
-        prompt = f"""基于以下信息，为每个实体生成社交媒体活动配置。
+        entity_json = json.dumps(entity_list, ensure_ascii=False, indent=2)
+        
+        if self.language == 'en':
+            prompt = f"""For each entity below, generate **social media activity parameters** as JSON.
+
+Simulation requirement: {simulation_requirement}
+
+## Entity list
+```json
+{entity_json}
+```
+
+## Rules
+- Use plausible **24-hour active_hours** (0-23) for the scenario: e.g. low activity 0-5, peak evening ~19-22 unless the role suggests otherwise (media may span 8-23; institutions often 9-17).
+- **Official / University / GovernmentAgency / NGO:** low activity (0.1-0.3), work-hour bias, slow response (60-240 min), high influence (2.5-3.0).
+- **MediaOutlet:** medium activity (0.4-0.6), wide hours (e.g. 8-23), fast response (5-30 min), high influence (2.0-2.5).
+- **Individuals** (Student/Person/Alumni): higher activity (0.6-0.9), more evening (e.g. 18-23), fast response (1-15 min), lower influence (0.8-1.2).
+- **Public figures / experts:** medium activity (0.4-0.6), medium-high influence (1.5-2.0).
+
+Return JSON only (no markdown). Use only these stance values: supportive, opposing, neutral, observer.
+
+{{
+    "agent_configs": [
+        {{
+            "agent_id": <must match input>,
+            "activity_level": <0.0-1.0>,
+            "posts_per_hour": <float>,
+            "comments_per_hour": <float>,
+            "active_hours": [<list of hours 0-23>],
+            "response_delay_min": <int minutes>,
+            "response_delay_max": <int minutes>,
+            "sentiment_bias": <-1.0 to 1.0>,
+            "stance": "<supportive/opposing/neutral/observer>",
+            "influence_weight": <float>
+        }},
+        ...
+    ]
+}}"""
+            system_prompt = (
+                "You are a social media behavior analysis expert. Return pure JSON only. "
+                "Every agent_id in the output must match the input list."
+            )
+        else:
+            prompt = f"""基于以下信息，为每个实体生成社交媒体活动配置。
 
 模拟需求: {simulation_requirement}
 
 ## 实体列表
 ```json
-{json.dumps(entity_list, ensure_ascii=False, indent=2)}
+{entity_json}
 ```
 
 ## 任务
@@ -870,10 +1002,6 @@ class SimulationConfigGenerator:
         ...
     ]
 }}"""
-
-        if self.language == 'en':
-            system_prompt = "You are a social media behavior analysis expert. Return pure JSON format."
-        else:
             system_prompt = "你是社交媒体行为分析专家。返回纯JSON，配置需符合中国人作息习惯。"
 
         try:

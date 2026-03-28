@@ -134,6 +134,10 @@ MESSAGES = {
         'en': 'LLM_API_KEY not configured',
         'zh': 'LLM_API_KEY 未配置'
     },
+    'llm_auth_failed': {
+        'en': 'LLM API authentication failed. Check LLM_API_KEY and LLM_BASE_URL in your environment (for example .env) match your provider.',
+        'zh': '大模型 API 鉴权失败，请检查环境变量中的 LLM_API_KEY 与 LLM_BASE_URL（如 .env）是否与服务商一致。'
+    },
     'zep_not_configured_config': {
         'en': 'ZEP_API_KEY not configured',
         'zh': 'ZEP_API_KEY 未配置'
@@ -171,6 +175,13 @@ MESSAGES = {
     'default_question': {
         'en': 'Please explain the public opinion trends',
         'zh': '请解释一下舆情走向'
+    },
+    'interview_env_not_running': {
+        'en': (
+            'The simulation environment is not running or has been closed. '
+            'Make sure the simulation has finished and is waiting for commands.'
+        ),
+        'zh': '模拟环境未运行或已关闭。请确保模拟已完成并进入等待命令模式。',
     },
 }
 

@@ -292,7 +292,14 @@
       "quickSearch": "QuickSearch 快速检索",
       "quickSearchDesc": "基于 GraphRAG 的即时查询接口，优化索引效率，用于快速提取具体的节点属性与离散事实"
     },
-    "generating": "正在生成{title}..."
+    "generating": "正在生成{title}...",
+    "chatInputPlaceholder": "输入您的问题...",
+    "chatErrorDetail": "抱歉，发生了错误: {detail}",
+    "chatSendFailed": "发送失败: {detail}",
+    "selectAgentFirst": "请先选择一个模拟个体",
+    "requestFailed": "请求失败",
+    "noResponse": "无响应",
+    "noResponseData": "无响应数据"
   },
   "graph": {
     "refreshBtn": "刷新图谱",
