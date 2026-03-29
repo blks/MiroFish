@@ -30,7 +30,19 @@ def normalize_pascal_case_name(raw_name: str, default_prefix: str = "Entity") ->
     Convert an arbitrary label into Zep-safe PascalCase.
     """
     text = str(raw_name or "").strip()
-    if text and PASCAL_CASE_PATTERN.match(text):
+    if not text:
+        return default_prefix
+
+    # Zep allows only alphanumerics. If the label is already alphanumeric and
+    # mixed-case (e.g. EconomicActivity, UnnamedEntity1), do NOT re-case it —
+    # joining split parts with part[1:].lower() would produce Economicactivity.
+    if re.fullmatch(r"[A-Za-z0-9]+", text):
+        has_lower = any(c.islower() for c in text)
+        has_upper = any(c.isupper() for c in text)
+        if has_lower and has_upper:
+            return text
+
+    if PASCAL_CASE_PATTERN.match(text):
         return text
 
     parts = _split_name_parts(text)
@@ -79,13 +91,13 @@ def normalize_ontology_for_zep(ontology: Dict[str, Any]) -> Tuple[Dict[str, Any]
     entity_types = normalized.setdefault("entity_types", [])
     edge_types = normalized.setdefault("edge_types", [])
 
-    used_entity_names: set[str] = set()
+    used_names: set[str] = set()
     entity_name_mapping: Dict[str, str] = {}
 
     for entity in entity_types:
         raw_name = str(entity.get("name", "")).strip()
         safe_name = normalize_pascal_case_name(raw_name, default_prefix="Entity")
-        safe_name = _ensure_unique_name(safe_name, used_entity_names)
+        safe_name = _ensure_unique_name(safe_name, used_names)
 
         entity["name"] = safe_name
 
@@ -115,5 +127,12 @@ def normalize_ontology_for_zep(ontology: Dict[str, Any]) -> Tuple[Dict[str, Any]
                 )
             else:
                 source_target["target"] = "Entity"
+
+    # Edge type names must also be alphanumeric PascalCase (no underscores).
+    for edge in edge_types:
+        raw_edge = str(edge.get("name", "")).strip()
+        safe_edge = normalize_pascal_case_name(raw_edge, default_prefix="Relation")
+        safe_edge = _ensure_unique_name(safe_edge, used_names)
+        edge["name"] = safe_edge
 
     return normalized, entity_name_mapping
