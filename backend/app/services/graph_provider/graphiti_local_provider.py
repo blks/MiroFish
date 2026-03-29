@@ -19,6 +19,10 @@ from pydantic import BaseModel, Field
 
 from ...config import Config
 from ...utils.logger import get_logger
+from ...utils.ontology_attribute_coercion import (
+    coerce_ontology_attribute_def,
+    python_safe_field_name,
+)
 from ...utils.ontology_normalizer import normalize_ontology_for_zep
 from .base import BaseGraphProvider, ProgressCallback
 from .models import GraphEdgeRecord, GraphNodeRecord, GraphSearchResult
@@ -550,9 +554,15 @@ class GraphitiLocalGraphProvider(BaseGraphProvider):
             description = entity_def.get("description", f"A {name} entity.")
             attrs: dict[str, Any] = {"__doc__": description}
             annotations: dict[str, Any] = {}
-            for attr_def in entity_def.get("attributes", []):
-                attr_name = safe_attr_name(attr_def["name"])
-                attr_desc = attr_def.get("description", attr_name)
+            for ai, attr_def in enumerate(entity_def.get("attributes", [])):
+                coerced = coerce_ontology_attribute_def(attr_def, ai)
+                if coerced is None:
+                    continue
+                raw_attr = str(coerced.get("name", "")).strip()
+                attr_name = safe_attr_name(python_safe_field_name(raw_attr, ai))
+                attr_desc = coerced.get("description", attr_name)
+                if not isinstance(attr_desc, str):
+                    attr_desc = str(attr_desc) if attr_desc is not None else attr_name
                 attrs[attr_name] = Field(default=None, description=attr_desc)
                 annotations[attr_name] = Optional[str]
             attrs["__annotations__"] = annotations
@@ -567,9 +577,15 @@ class GraphitiLocalGraphProvider(BaseGraphProvider):
             description = edge_def.get("description", f"A {name} relationship.")
             attrs = {"__doc__": description}
             annotations = {}
-            for attr_def in edge_def.get("attributes", []):
-                attr_name = safe_attr_name(attr_def["name"])
-                attr_desc = attr_def.get("description", attr_name)
+            for ai, attr_def in enumerate(edge_def.get("attributes", [])):
+                coerced = coerce_ontology_attribute_def(attr_def, ai)
+                if coerced is None:
+                    continue
+                raw_attr = str(coerced.get("name", "")).strip()
+                attr_name = safe_attr_name(python_safe_field_name(raw_attr, ai))
+                attr_desc = coerced.get("description", attr_name)
+                if not isinstance(attr_desc, str):
+                    attr_desc = str(attr_desc) if attr_desc is not None else attr_name
                 attrs[attr_name] = Field(default=None, description=attr_desc)
                 annotations[attr_name] = Optional[str]
             attrs["__annotations__"] = annotations

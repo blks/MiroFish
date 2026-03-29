@@ -1,5 +1,6 @@
 """Ontology generation service."""
 
+import json
 import re
 from typing import Dict, Any, List, Optional
 
@@ -12,6 +13,10 @@ _ENTITY_LABEL_KEYS: tuple[str, ...] = (
     "type",
     "entity_type",
     "entityType",
+    "entity_name",
+    "entityName",
+    "display_name",
+    "displayName",
     "label",
     "title",
     "kind",
@@ -71,7 +76,7 @@ def _first_non_empty_str_field(d: Dict[str, Any], keys: tuple[str, ...]) -> Opti
 
 
 def _label_from_description(desc: str, max_words: int = 4) -> Optional[str]:
-    """Pull a short alphabetic phrase from a description for use as a name hint."""
+    """Pull a short phrase from a description for use as a name hint (prefer Latin tokens)."""
     text = (desc or "").strip()[:240]
     if not text:
         return None
@@ -80,6 +85,11 @@ def _label_from_description(desc: str, max_words: int = 4) -> Optional[str]:
         return None
     words = re.findall(r"[A-Za-z][A-Za-z0-9]*", chunk)
     if not words:
+        # Embedded English in mixed-language text (e.g. Chinese description mentioning "Rector")
+        embedded = re.findall(r"[A-Za-z]{3,}", chunk)
+        if embedded:
+            sig = [w for w in embedded[:6] if w.lower() not in _DESC_STOP_WORDS]
+            return " ".join((sig or embedded)[:max_words])
         return None
     sig = [w for w in words[:8] if w.lower() not in _DESC_STOP_WORDS]
     if not sig:
@@ -186,6 +196,8 @@ Output JSON in the following structure:
 
 - Every object in `entity_types` MUST include a non-empty string field `"name"` (English, PascalCase, letters and digits only). This is the canonical type identifier shown in the UI.
 - Do not omit `"name"` or leave it blank. Do not use only `"type"`, `"label"`, or `"title"` — if you use those, set `"name"` to the same value.
+- **Language**: Even when the source document is Chinese or another language, every entity type `name`, `description`, and `examples` entry MUST be **English**. Translate role labels into concise English PascalCase type names (e.g. `UniversityRector`, `CampusNewspaper`, `FacultySenate`).
+- **Never omit `name` in favor of `type` only**: each `entity_types` object MUST have `"name": "PascalCaseName"`. You may repeat the same string in `"type"` if you want, but the UI and API require `name`. Do not use `"type"` alone without `"name"`.
 - Every object in `edge_types` MUST include a non-empty string `"name"` (English, UPPER_SNAKE_CASE in your output; the system may normalize it).
 
 ### 1. Entity type design - must be followed strictly
@@ -302,9 +314,8 @@ class OntologyGenerator:
             temperature=0.3,
             max_tokens=4096
         )
-        
-        
-        result = self._validate_and_process(result)
+
+        result = self._validate_and_process(result, simulation_requirement=simulation_requirement)
         
         return result
     
@@ -335,6 +346,8 @@ class OntologyGenerator:
 
 {simulation_requirement}
 
+**Output language (required):** In your JSON, use **English only** for every `entity_types[].name`, `entity_types[].description`, `entity_types[].examples`, `edge_types[].name`, and `edge_types[].description` — even if the document above is not in English. Translate roles from the text into specific English type names (not generic words like "Actor" or "Participant" unless unavoidable).
+
 ## Document Content
 
 {combined_text}
@@ -361,10 +374,73 @@ Based on the content above, design entity types and relationship types suitable 
         
         return message
     
-    def _validate_and_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _repair_placeholder_entity_names(
+        self, result: Dict[str, Any], simulation_requirement: str
+    ) -> None:
+        """Second LLM pass when the main response still used UnnamedEntity* placeholders."""
+        entities = result.get("entity_types") or []
+        to_fix: list[tuple[int, str, list[Any]]] = []
+        for i, e in enumerate(entities):
+            if not isinstance(e, dict):
+                continue
+            nm = str(e.get("name") or "").strip()
+            if re.match(r"^UnnamedEntity\d+$", nm, re.IGNORECASE):
+                desc = str(e.get("description") or "")[:400]
+                ex = e.get("examples") if isinstance(e.get("examples"), list) else []
+                to_fix.append((i, desc, ex[:3]))
+
+        if not to_fix:
+            return
+
+        payload = [
+            {
+                "index": idx,
+                "description": desc,
+                "examples": [x for x in ex if isinstance(x, str)][:3],
+            }
+            for idx, desc, ex in to_fix
+        ]
+        repair_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You fix ontology entity type names. Return JSON only: "
+                    '{"names": ["EnglishPascalCase", ...]} with the same length as the input list. '
+                    "Each name: English PascalCase, letters and digits only, no spaces. "
+                    "Use specific roles from each description (e.g. UniversityAdministrator, "
+                    "StudentNewspaper). Do not use UnnamedEntity or generic Actor1."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Simulation requirement (context, may truncate):\n"
+                    f"{simulation_requirement[:1200]}\n\n"
+                    f"Placeholders to replace (JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+                ),
+            },
+        ]
+        try:
+            out = self.llm_client.chat_json(
+                messages=repair_messages,
+                temperature=0.15,
+                max_tokens=1024,
+            )
+            names = out.get("names")
+            if not isinstance(names, list) or len(names) != len(to_fix):
+                return
+            for (idx, _, _), new_name in zip(to_fix, names):
+                nn = str(new_name or "").strip()
+                if nn and not re.match(r"^UnnamedEntity\d*$", nn, re.IGNORECASE):
+                    entities[idx]["name"] = nn
+        except Exception:
+            pass
+
+    def _validate_and_process(
+        self, result: Dict[str, Any], simulation_requirement: str = ""
+    ) -> Dict[str, Any]:
         """Validate And Process."""
-        
-        
+
         if "entity_types" not in result:
             result["entity_types"] = []
         if "edge_types" not in result:
@@ -372,18 +448,35 @@ Based on the content above, design entity types and relationship types suitable 
         if "analysis_summary" not in result:
             result["analysis_summary"] = ""
 
-        # Skip non-dict items; ensure names exist (coalesce type/label/examples/description before Unnamed*).
+        # Coerce string entries; ensure names exist (coalesce type/label/examples/description before Unnamed*).
         clean_entities: List[Dict[str, Any]] = []
         for i, entity in enumerate(result["entity_types"]):
+            if isinstance(entity, str):
+                s = entity.strip()
+                entity = {
+                    "name": s,
+                    "description": "",
+                    "attributes": [],
+                    "examples": [],
+                } if s else {}
             if not isinstance(entity, dict):
                 continue
             if not str(entity.get("name") or "").strip():
                 entity = {**entity, "name": _resolve_entity_label(entity, i)}
             clean_entities.append(entity)
         result["entity_types"] = clean_entities
+        self._repair_placeholder_entity_names(result, simulation_requirement)
 
         clean_edges: List[Dict[str, Any]] = []
         for i, edge in enumerate(result["edge_types"]):
+            if isinstance(edge, str):
+                s = edge.strip()
+                edge = {
+                    "name": s,
+                    "description": "",
+                    "source_targets": [],
+                    "attributes": [],
+                } if s else {}
             if not isinstance(edge, dict):
                 continue
             if not str(edge.get("name") or "").strip():
