@@ -14,7 +14,8 @@ from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
-from ..utils.messages import msg
+from ..utils.messages import msg, get_request_language
+from ..utils.graph_text_i18n import maybe_localize_graph_data_for_request
 
 
 logger = get_logger('mirofish.api')
@@ -184,8 +185,7 @@ def generate_ontology():
             simulation_requirement=simulation_requirement,
             additional_context=additional_context if additional_context else None
         )
-        
-        
+
         entity_count = len(ontology.get("entity_types", []))
         edge_count = len(ontology.get("edge_types", []))
         logger.info(f"Ontology generation completed: {entity_count} entity types, {edge_count} edge types")
@@ -210,15 +210,13 @@ def generate_ontology():
                 "total_text_length": project.total_text_length
             }
         })
-        
+
     except Exception as e:
         return jsonify({
             "success": False,
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
-
-
 
 
 @graph_bp.route('/build', methods=['POST'])
@@ -512,7 +510,10 @@ def get_graph_data(graph_id: str):
 
         builder = GraphBuilderService()
         graph_data = builder.get_graph_data(graph_id)
-        
+        graph_data = maybe_localize_graph_data_for_request(
+            graph_data, graph_id, get_request_language()
+        )
+
         return jsonify({
             "success": True,
             "data": graph_data

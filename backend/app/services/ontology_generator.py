@@ -1,9 +1,121 @@
 """Ontology generation service."""
 
-import json
+import re
 from typing import Dict, Any, List, Optional
+
 from ..utils.llm_client import LLMClient
 from ..utils.ontology_normalizer import normalize_ontology_for_zep
+
+# LLMs often put the type label in `type`, `label`, or similar instead of `name`.
+_ENTITY_LABEL_KEYS: tuple[str, ...] = (
+    "name",
+    "type",
+    "entity_type",
+    "entityType",
+    "label",
+    "title",
+    "kind",
+    "category",
+    "class",
+    "role_type",
+    "roleType",
+)
+_EDGE_LABEL_KEYS: tuple[str, ...] = (
+    "name",
+    "type",
+    "relation",
+    "relationship",
+    "rel_type",
+    "relType",
+    "label",
+    "edge_type",
+    "edgeType",
+)
+
+_DESC_STOP_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "any",
+        "for",
+        "and",
+        "or",
+        "who",
+        "that",
+        "this",
+        "these",
+        "type",
+        "entity",
+        "represents",
+        "person",
+        "organization",
+        "used",
+        "when",
+        "with",
+        "from",
+        "into",
+    }
+)
+
+
+def _first_non_empty_str_field(d: Dict[str, Any], keys: tuple[str, ...]) -> Optional[str]:
+    for key in keys:
+        v = d.get(key)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
+def _label_from_description(desc: str, max_words: int = 4) -> Optional[str]:
+    """Pull a short alphabetic phrase from a description for use as a name hint."""
+    text = (desc or "").strip()[:240]
+    if not text:
+        return None
+    chunk = re.split(r"[.!?\n]", text, maxsplit=1)[0].strip()
+    if not chunk:
+        return None
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]*", chunk)
+    if not words:
+        return None
+    sig = [w for w in words[:8] if w.lower() not in _DESC_STOP_WORDS]
+    if not sig:
+        sig = words[:3]
+    return " ".join(sig[:max_words])
+
+
+def _resolve_entity_label(entity: Dict[str, Any], index: int) -> str:
+    s = _first_non_empty_str_field(entity, _ENTITY_LABEL_KEYS)
+    if s:
+        return s
+    examples = entity.get("examples")
+    if isinstance(examples, list):
+        for ex in examples[:3]:
+            if isinstance(ex, str):
+                exs = ex.strip()
+                if exs and len(exs) <= 80 and not exs.lower().startswith("http"):
+                    return exs
+    desc = entity.get("description")
+    if desc is not None:
+        hint = _label_from_description(str(desc))
+        if hint:
+            return hint
+    return f"UnnamedEntity{index + 1}"
+
+
+def _resolve_edge_label(edge: Dict[str, Any], index: int) -> str:
+    s = _first_non_empty_str_field(edge, _EDGE_LABEL_KEYS)
+    if s:
+        return s
+    desc = edge.get("description")
+    if desc is not None:
+        hint = _label_from_description(str(desc), max_words=3)
+        if hint:
+            return hint
+    return f"UnnamedRelation{index + 1}"
 
 
 
@@ -69,6 +181,12 @@ Output JSON in the following structure:
 ```
 
 ## Design guidelines (very important)
+
+### 0. JSON field rules (mandatory)
+
+- Every object in `entity_types` MUST include a non-empty string field `"name"` (English, PascalCase, letters and digits only). This is the canonical type identifier shown in the UI.
+- Do not omit `"name"` or leave it blank. Do not use only `"type"`, `"label"`, or `"title"` — if you use those, set `"name"` to the same value.
+- Every object in `edge_types` MUST include a non-empty string `"name"` (English, UPPER_SNAKE_CASE in your output; the system may normalize it).
 
 ### 1. Entity type design - must be followed strictly
 
@@ -253,27 +371,51 @@ Based on the content above, design entity types and relationship types suitable 
             result["edge_types"] = []
         if "analysis_summary" not in result:
             result["analysis_summary"] = ""
-        
-        
+
+        # Skip non-dict items; ensure names exist (coalesce type/label/examples/description before Unnamed*).
+        clean_entities: List[Dict[str, Any]] = []
+        for i, entity in enumerate(result["entity_types"]):
+            if not isinstance(entity, dict):
+                continue
+            if not str(entity.get("name") or "").strip():
+                entity = {**entity, "name": _resolve_entity_label(entity, i)}
+            clean_entities.append(entity)
+        result["entity_types"] = clean_entities
+
+        clean_edges: List[Dict[str, Any]] = []
+        for i, edge in enumerate(result["edge_types"]):
+            if not isinstance(edge, dict):
+                continue
+            if not str(edge.get("name") or "").strip():
+                edge = {**edge, "name": _resolve_edge_label(edge, i)}
+            clean_edges.append(edge)
+        result["edge_types"] = clean_edges
+
         for entity in result["entity_types"]:
             if "attributes" not in entity:
                 entity["attributes"] = []
             if "examples" not in entity:
                 entity["examples"] = []
-            
-            if len(entity.get("description", "")) > 100:
-                entity["description"] = entity["description"][:97] + "..."
-        
-        
+
+            desc = entity.get("description") or ""
+            desc = desc if isinstance(desc, str) else str(desc)
+            if len(desc) > 100:
+                entity["description"] = desc[:97] + "..."
+            else:
+                entity["description"] = desc
+
         for edge in result["edge_types"]:
             if "source_targets" not in edge:
                 edge["source_targets"] = []
             if "attributes" not in edge:
                 edge["attributes"] = []
-            if len(edge.get("description", "")) > 100:
-                edge["description"] = edge["description"][:97] + "..."
-        
-        
+            desc = edge.get("description") or ""
+            desc = desc if isinstance(desc, str) else str(desc)
+            if len(desc) > 100:
+                edge["description"] = desc[:97] + "..."
+            else:
+                edge["description"] = desc
+
         MAX_ENTITY_TYPES = 10
         MAX_EDGE_TYPES = 10
         

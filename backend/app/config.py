@@ -57,8 +57,13 @@ class Config:
     GRAPHITI_RERANKER_API_KEY = os.environ.get('GRAPHITI_RERANKER_API_KEY') or LLM_API_KEY
     GRAPHITI_RERANKER_BASE_URL = os.environ.get('GRAPHITI_RERANKER_BASE_URL') or LLM_BASE_URL
     GRAPHITI_RERANKER_MODEL = os.environ.get('GRAPHITI_RERANKER_MODEL') or LLM_MODEL_NAME
-    
-    
+
+    # When true and Accept-Language is English, GET /graph/data translates CJK node summaries
+    # and edge facts via LLM (cached). Set false to skip extra LLM calls.
+    GRAPH_I18N_TRANSLATE_ON_READ = (
+        os.environ.get('GRAPH_I18N_TRANSLATE_ON_READ', 'true').lower() == 'true'
+    )
+
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
     UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '../uploads')
     ALLOWED_EXTENSIONS = {'pdf', 'md', 'txt', 'markdown'}

@@ -214,7 +214,12 @@ class SimulationManager:
         parallel_profile_count: int = 3,
         language: str = 'en',
     ) -> SimulationState:
-        """Prepare simulation (language: 'en' or 'zh' for profile/config generation)."""
+        """Prepare simulation.
+
+        ``language`` should match the client's ``Accept-Language`` (e.g. from
+        :func:`app.utils.messages.get_request_language`) so profile and config LLM prompts
+        use English or Chinese consistently.
+        """
         state = self._load_simulation_state(simulation_id)
         if not state:
             raise ValueError(f"Simulation not found: {simulation_id}")

@@ -126,6 +126,10 @@ LLM_MODEL_NAME=qwen-plus
 # Use zep_cloud for hosted Zep, or graphiti_local for local Neo4j + Graphiti
 GRAPH_BACKEND=zep_cloud
 
+# Optional: when true (default), graph API translates CJK node summaries and edge facts to English
+# for clients sending Accept-Language: en (uses the main LLM; in-process cache).
+GRAPH_I18N_TRANSLATE_ON_READ=true
+
 # Zep Cloud configuration
 # Required only when GRAPH_BACKEND=zep_cloud
 ZEP_API_KEY=your_zep_api_key

@@ -5,7 +5,7 @@ import zh from './locales/zh.json'
 const i18n = createI18n({
   legacy: false,
   locale: localStorage.getItem('mirofish-locale') || 'en',
-  fallbackLocale: 'zh',
+  fallbackLocale: 'en',
   messages: { en, zh }
 })
 
