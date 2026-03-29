@@ -6,25 +6,25 @@
         <div class="card-header">
           <div class="step-info">
             <span class="step-num">01</span>
-            <span class="step-title">{{ $t('step1.ontology.title') }}</span>
+            <span class="step-title">Ontology Generation</span>
           </div>
           <div class="step-status">
-            <span v-if="currentPhase > 0" class="badge success">{{ $t('common.status.completed') }}</span>
-            <span v-else-if="currentPhase === 0" class="badge processing">{{ $t('common.status.processing') }}</span>
-            <span v-else class="badge pending">{{ $t('common.status.pending') }}</span>
+            <span v-if="currentPhase > 0" class="badge success">Completed</span>
+            <span v-else-if="currentPhase === 0" class="badge processing">Generating</span>
+            <span v-else class="badge pending">Pending</span>
           </div>
         </div>
         
         <div class="card-content">
           <p class="api-note">POST /api/graph/ontology/generate</p>
           <p class="description">
-            {{ $t('step1.ontology.desc') }}
+            The LLM analyzes the documents and simulation requirement, extracts real-world seeds, and generates a fitting ontology automatically.
           </p>
 
           <!-- Loading / Progress -->
           <div v-if="currentPhase === 0 && ontologyProgress" class="progress-section">
             <div class="spinner-sm"></div>
-            <span>{{ ontologyProgress.message || $t('step1.ontology.progress') }}</span>
+            <span>{{ ontologyProgress.message || 'Analyzing documents...' }}</span>
           </div>
 
           <!-- Detail Overlay -->
@@ -110,34 +110,34 @@
         <div class="card-header">
           <div class="step-info">
             <span class="step-num">02</span>
-            <span class="step-title">{{ $t('step1.graphBuild.title') }}</span>
+            <span class="step-title">GraphRAG Build</span>
           </div>
           <div class="step-status">
-            <span v-if="currentPhase > 1" class="badge success">{{ $t('common.status.completed') }}</span>
+            <span v-if="currentPhase > 1" class="badge success">Completed</span>
             <span v-else-if="currentPhase === 1" class="badge processing">{{ buildProgress?.progress || 0 }}%</span>
-            <span v-else class="badge pending">{{ $t('common.status.pending') }}</span>
+            <span v-else class="badge pending">Pending</span>
           </div>
         </div>
 
         <div class="card-content">
           <p class="api-note">POST /api/graph/build</p>
           <p class="description">
-            {{ $t('step1.graphBuild.desc') }}
+            Using the generated ontology, the documents are chunked automatically and sent to Zep to build the knowledge graph, extract entities and relations, and form temporal memory plus community summaries.
           </p>
           
           <!-- Stats Cards -->
           <div class="stats-grid">
             <div class="stat-card">
               <span class="stat-value">{{ graphStats.nodes }}</span>
-              <span class="stat-label">{{ $t('step1.graphBuild.entityNodes') }}</span>
+              <span class="stat-label">Entity Nodes</span>
             </div>
             <div class="stat-card">
               <span class="stat-value">{{ graphStats.edges }}</span>
-              <span class="stat-label">{{ $t('step1.graphBuild.relationEdges') }}</span>
+              <span class="stat-label">Relationship Edges</span>
             </div>
             <div class="stat-card">
               <span class="stat-value">{{ graphStats.types }}</span>
-              <span class="stat-label">{{ $t('step1.graphBuild.schemaTypes') }}</span>
+              <span class="stat-label">Schema Types</span>
             </div>
           </div>
         </div>
@@ -148,24 +148,38 @@
         <div class="card-header">
           <div class="step-info">
             <span class="step-num">03</span>
-            <span class="step-title">{{ $t('step1.complete.title') }}</span>
+            <span class="step-title">Build Complete</span>
           </div>
           <div class="step-status">
-            <span v-if="currentPhase >= 2" class="badge accent">{{ $t('common.status.processing') }}</span>
+            <span v-if="currentPhase >= 2" class="badge accent">Ready</span>
           </div>
         </div>
         
         <div class="card-content">
           <p class="api-note">POST /api/simulation/create</p>
-          <p class="description">{{ $t('step1.complete.desc') }}</p>
+          <p class="description">The graph build is complete. Continue to the next step to set up the simulation environment.</p>
           <button 
             class="action-btn" 
             :disabled="currentPhase < 2 || creatingSimulation"
             @click="handleEnterEnvSetup"
           >
             <span v-if="creatingSimulation" class="spinner-sm"></span>
-            {{ creatingSimulation ? $t('step1.complete.creating') : $t('step1.complete.enterEnvSetup') }}
+            {{ creatingSimulation ? 'Creating...' : 'Enter Environment Setup ➝' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Info / Logs -->
+    <div class="system-logs">
+      <div class="log-header">
+        <span class="log-title">SYSTEM DASHBOARD</span>
+        <span class="log-id">{{ projectData?.project_id || 'NO_PROJECT' }}</span>
+      </div>
+      <div class="log-content" ref="logContent">
+        <div class="log-line" v-for="(log, idx) in systemLogs" :key="idx">
+          <span class="log-time">{{ log.time }}</span>
+          <span class="log-msg">{{ log.msg }}</span>
         </div>
       </div>
     </div>
@@ -173,7 +187,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSimulation } from '../api/simulation'
 
@@ -184,18 +198,20 @@ const props = defineProps({
   projectData: Object,
   ontologyProgress: Object,
   buildProgress: Object,
-  graphData: Object
+  graphData: Object,
+  systemLogs: { type: Array, default: () => [] }
 })
 
 defineEmits(['next-step'])
 
 const selectedOntologyItem = ref(null)
+const logContent = ref(null)
 const creatingSimulation = ref(false)
 
-// 进入环境搭建 - 创建 simulation 并跳转
+
 const handleEnterEnvSetup = async () => {
   if (!props.projectData?.project_id || !props.projectData?.graph_id) {
-    console.error('Missing project or graph info')
+    console.error('Missing project or graph information')
     return
   }
   
@@ -210,7 +226,7 @@ const handleEnterEnvSetup = async () => {
     })
     
     if (res.success && res.data?.simulation_id) {
-      // 跳转到 simulation 页面
+      
       router.push({
         name: 'Simulation',
         params: { simulationId: res.data.simulation_id }
@@ -244,12 +260,18 @@ const formatDate = (dateStr) => {
   return d.toLocaleTimeString('en-US', { hour12: false }) + '.' + d.getMilliseconds()
 }
 
+// Auto-scroll logs
+watch(() => props.systemLogs.length, () => {
+  nextTick(() => {
+    if (logContent.value) {
+      logContent.value.scrollTop = logContent.value.scrollHeight
+    }
+  })
+})
 </script>
 
 <style scoped>
 .workbench-panel {
-  flex: 1;
-  min-height: 0;
   height: 100%;
   background-color: #FAFAFA;
   display: flex;
@@ -618,4 +640,59 @@ const formatDate = (dateStr) => {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* System Logs */
+.system-logs {
+  background: #000;
+  color: #DDD;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  border-top: 1px solid #222;
+  flex-shrink: 0;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #333;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: #888;
+}
+
+.log-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 80px; /* Approx 4 lines visible */
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.log-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+.log-line {
+  font-size: 11px;
+  display: flex;
+  gap: 12px;
+  line-height: 1.5;
+}
+
+.log-time {
+  color: #666;
+  min-width: 75px;
+}
+
+.log-msg {
+  color: #CCC;
+  word-break: break-all;
+}
 </style>

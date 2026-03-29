@@ -15,7 +15,7 @@
             :class="{ active: viewMode === mode }"
             @click="viewMode = mode"
           >
-            {{ $t('common.viewModes.' + mode) }}
+            {{ { graph: 'Graph', split: 'Split', workbench: 'Workbench' }[mode] }}
           </button>
         </div>
       </div>
@@ -23,7 +23,7 @@
       <div class="header-right">
         <div class="workflow-step">
           <span class="step-num">Step 5/5</span>
-          <span class="step-name">{{ $t('common.stepNames.interaction') }}</span>
+          <span class="step-name">Deep Interaction</span>
         </div>
         <div class="step-divider"></div>
         <span class="status-indicator" :class="statusClass">
@@ -47,7 +47,7 @@
         />
       </div>
 
-      <!-- Right Panel: Step5 深度互动 -->
+      <!-- Right Panel: Step 5 Deep Interaction -->
       <div class="panel-wrapper right" :style="rightPanelStyle">
         <Step5Interaction
           :reportId="currentReportId"
@@ -64,7 +64,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step5Interaction from '../components/Step5Interaction.vue'
 import { getProject, getGraphData } from '../api/graph'
@@ -73,14 +72,13 @@ import { getReport } from '../api/report'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
 
 // Props
 const props = defineProps({
   reportId: String
 })
 
-// Layout State - 默认切换到工作台视角
+// Layout state - default to the workbench view
 const viewMode = ref('workbench')
 
 // Data State
@@ -142,28 +140,28 @@ const toggleMaximize = (target) => {
 // --- Data Logic ---
 const loadReportData = async () => {
   try {
-    addLog(t('interactionView.log.loadData', { id: currentReportId.value }))
+    addLog(`Loading report data: ${currentReportId.value}`)
     
-    // 获取 report 信息以获取 simulation_id
+    // Fetch report info to get the simulation_id
     const reportRes = await getReport(currentReportId.value)
     if (reportRes.success && reportRes.data) {
       const reportData = reportRes.data
       simulationId.value = reportData.simulation_id
       
       if (simulationId.value) {
-        // 获取 simulation 信息
+        // Fetch simulation info
         const simRes = await getSimulation(simulationId.value)
         if (simRes.success && simRes.data) {
           const simData = simRes.data
           
-          // 获取 project 信息
+          // Fetch project info
           if (simData.project_id) {
             const projRes = await getProject(simData.project_id)
             if (projRes.success && projRes.data) {
               projectData.value = projRes.data
-              addLog(t('interactionView.log.projectLoaded', { id: projRes.data.project_id }))
+              addLog(`Project loaded successfully: ${projRes.data.project_id}`)
               
-              // 获取 graph 数据
+              // Fetch graph data
               if (projRes.data.graph_id) {
                 await loadGraph(projRes.data.graph_id)
               }
@@ -172,10 +170,10 @@ const loadReportData = async () => {
         }
       }
     } else {
-      addLog(t('interactionView.log.loadFail', { error: reportRes.error || 'Unknown' }))
+      addLog(`Failed to fetch report info: ${reportRes.error || 'Unknown error'}`)
     }
   } catch (err) {
-    addLog(t('interactionView.log.loadError', { error: err.message }))
+    addLog(`Load error: ${err.message}`)
   }
 }
 
@@ -186,10 +184,10 @@ const loadGraph = async (graphId) => {
     const res = await getGraphData(graphId)
     if (res.success) {
       graphData.value = res.data
-      addLog(t('interactionView.log.graphLoaded'))
+      addLog('Graph data loaded successfully')
     }
   } catch (err) {
-    addLog(t('interactionView.log.graphFail', { error: err.message }))
+    addLog(`Failed to load graph data: ${err.message}`)
   } finally {
     graphLoading.value = false
   }
@@ -210,7 +208,7 @@ watch(() => route.params.reportId, (newId) => {
 }, { immediate: true })
 
 onMounted(() => {
-  addLog(t('interactionView.log.init'))
+  addLog('InteractionView initialized')
   loadReportData()
 })
 </script>

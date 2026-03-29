@@ -4,7 +4,7 @@
 
 <a href="https://trendshift.io/repositories/16144" target="_blank"><img src="https://trendshift.io/api/badge/repositories/16144" alt="666ghj%2FMiroFish | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-简洁通用的群体智能引擎，预测万物
+A simple, universal swarm intelligence engine for predicting anything
 </br>
 <em>A Simple and Universal Swarm Intelligence Engine, Predicting Anything</em>
 
@@ -20,7 +20,7 @@
 [![X](https://img.shields.io/badge/X-Follow-000000?style=flat-square&logo=x&logoColor=white)](https://x.com/mirofish_ai)
 [![Instagram](https://img.shields.io/badge/Instagram-Follow-E4405F?style=flat-square&logo=instagram&logoColor=white)](https://www.instagram.com/mirofish_ai/)
 
-[English](./README-EN.md) | [中文文档](./README.md)
+[README](./README.md) | [English Copy](./README-EN.md)
 
 </div>
 
@@ -49,16 +49,16 @@ Welcome to visit our online demo environment and experience a prediction simulat
 <div align="center">
 <table>
 <tr>
-<td><img src="./static/image/Screenshot/运行截图1.png" alt="Screenshot 1" width="100%"/></td>
-<td><img src="./static/image/Screenshot/运行截图2.png" alt="Screenshot 2" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-1.png" alt="Screenshot 1" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-2.png" alt="Screenshot 2" width="100%"/></td>
 </tr>
 <tr>
-<td><img src="./static/image/Screenshot/运行截图3.png" alt="Screenshot 3" width="100%"/></td>
-<td><img src="./static/image/Screenshot/运行截图4.png" alt="Screenshot 4" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-3.png" alt="Screenshot 3" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-4.png" alt="Screenshot 4" width="100%"/></td>
 </tr>
 <tr>
-<td><img src="./static/image/Screenshot/运行截图5.png" alt="Screenshot 5" width="100%"/></td>
-<td><img src="./static/image/Screenshot/运行截图6.png" alt="Screenshot 6" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-5.png" alt="Screenshot 5" width="100%"/></td>
+<td><img src="./static/image/Screenshot/screenshot-6.png" alt="Screenshot 6" width="100%"/></td>
 </tr>
 </table>
 </div>
@@ -68,7 +68,7 @@ Welcome to visit our online demo environment and experience a prediction simulat
 ### 1. Wuhan University Public Opinion Simulation + MiroFish Project Introduction
 
 <div align="center">
-<a href="https://www.bilibili.com/video/BV1VYBsBHEMY/" target="_blank"><img src="./static/image/武大模拟演示封面.png" alt="MiroFish Demo Video" width="75%"/></a>
+<a href="https://www.bilibili.com/video/BV1VYBsBHEMY/" target="_blank"><img src="./static/image/wuhan-demo-cover.png" alt="MiroFish Demo Video" width="75%"/></a>
 
 Click the image to watch the complete demo video for prediction using BettaFish-generated "Wuhan University Public Opinion Report"
 </div>
@@ -76,7 +76,7 @@ Click the image to watch the complete demo video for prediction using BettaFish-
 ### 2. Dream of the Red Chamber Lost Ending Simulation
 
 <div align="center">
-<a href="https://www.bilibili.com/video/BV1cPk3BBExq" target="_blank"><img src="./static/image/红楼梦模拟推演封面.jpg" alt="MiroFish Demo Video" width="75%"/></a>
+<a href="https://www.bilibili.com/video/BV1cPk3BBExq" target="_blank"><img src="./static/image/dream-of-red-chamber-cover.jpg" alt="MiroFish Demo Video" width="75%"/></a>
 
 Click the image to watch MiroFish's deep prediction of the lost ending based on hundreds of thousands of words from the first 80 chapters of "Dream of the Red Chamber"
 </div>
@@ -122,9 +122,21 @@ LLM_API_KEY=your_api_key
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL_NAME=qwen-plus
 
-# Zep Cloud Configuration
-# Free monthly quota is sufficient for simple usage: https://app.getzep.com/
+# Graph backend selection
+# Use zep_cloud for hosted Zep, or graphiti_local for local Neo4j + Graphiti
+GRAPH_BACKEND=zep_cloud
+
+# Zep Cloud configuration
+# Required only when GRAPH_BACKEND=zep_cloud
 ZEP_API_KEY=your_zep_api_key
+
+# Local Graphiti + Neo4j configuration
+# Required only when GRAPH_BACKEND=graphiti_local
+# Note: the local Graphiti backend stores all graphs in one Neo4j database
+# and isolates each MiroFish graph by Graphiti `group_id`.
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
 ```
 
 #### 2. Install Dependencies
@@ -151,6 +163,17 @@ npm run setup:backend
 npm run dev
 ```
 
+If you use `GRAPH_BACKEND=graphiti_local`, start Neo4j too:
+
+```bash
+docker compose up -d neo4j
+```
+
+The bundled `docker-compose.yml` uses `neo4j:5.26.22-enterprise` with
+`NEO4J_ACCEPT_LICENSE_AGREEMENT=yes` as the safe local default.
+The current local backend still keeps all graphs in the default Neo4j database
+and maps each MiroFish `graph_id` directly to a Graphiti `group_id`.
+
 **Service URLs:**
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:5001`
@@ -175,11 +198,12 @@ docker compose up -d
 Reads `.env` from root directory by default, maps ports `3000 (frontend) / 5001 (backend)`
 
 > Mirror address for faster pulling is provided as comments in `docker-compose.yml`, replace if needed.
+> When `GRAPH_BACKEND=graphiti_local`, the bundled compose stack starts a local Neo4j instance for Graphiti storage. The repo keeps the enterprise image as the default compose target because existing local stores may use the block format.
 
 ## 📬 Join the Conversation
 
 <div align="center">
-<img src="./static/image/QQ群.png" alt="QQ Group" width="60%"/>
+<img src="./static/image/qq-group.png" alt="QQ Group" width="60%"/>
 </div>
 
 &nbsp;

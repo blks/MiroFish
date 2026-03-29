@@ -15,13 +15,12 @@
             :class="{ active: viewMode === mode }"
             @click="viewMode = mode"
           >
-            {{ $t('common.viewModes.' + mode) }}
+            {{ { graph: 'Graph', split: 'Split', workbench: 'Workbench' }[mode] }}
           </button>
         </div>
       </div>
 
       <div class="header-right">
-        <LanguageSwitcher />
         <div class="workflow-step">
           <span class="step-num">Step {{ currentStep }}/5</span>
           <span class="step-name">{{ stepNames[currentStep - 1] }}</span>
@@ -49,33 +48,18 @@
 
       <!-- Right Panel: Step Components -->
       <div class="panel-wrapper right" :style="rightPanelStyle">
-        <!-- Step 1: 图谱构建 (logs are sibling of workbench, not inside scroll area) -->
-        <div v-if="currentStep === 1" class="right-panel-step1">
-          <Step1GraphBuild 
-            :currentPhase="currentPhase"
-            :projectData="projectData"
-            :ontologyProgress="ontologyProgress"
-            :buildProgress="buildProgress"
-            :graphData="graphData"
-            @next-step="handleNextStep"
-          />
-        </div>
-        <div
+        <!-- Step 1: Graph Building -->
+        <Step1GraphBuild 
           v-if="currentStep === 1"
-          class="log-content"
-        >
-          <div class="log-header">
-            <span class="log-title">SYSTEM DASHBOARD</span>
-            <span class="log-id">{{ projectData?.project_id || 'NO_PROJECT' }}</span>
-          </div>
-          <div class="log-scroll" ref="logScrollArea">
-            <div class="log-line" v-for="(log, idx) in systemLogs" :key="idx">
-              <span class="log-time">{{ log.time }}</span>
-              <span class="log-msg">{{ log.msg }}</span>
-            </div>
-          </div>
-        </div>
-        <!-- Step 2: 环境搭建 -->
+          :currentPhase="currentPhase"
+          :projectData="projectData"
+          :ontologyProgress="ontologyProgress"
+          :buildProgress="buildProgress"
+          :graphData="graphData"
+          :systemLogs="systemLogs"
+          @next-step="handleNextStep"
+        />
+        <!-- Step 2: Environment Setup -->
         <Step2EnvSetup
           v-else-if="currentStep === 2"
           :projectData="projectData"
@@ -91,26 +75,23 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
-import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
 
 // Layout State
 const viewMode = ref('split') // graph | split | workbench
 
 // Step State
-const currentStep = ref(1) // 1: 图谱构建, 2: 环境搭建, 3: 开始模拟, 4: 报告生成, 5: 深度互动
-const stepNames = computed(() => [t('common.stepNames.graphBuild'), t('common.stepNames.envSetup'), t('common.stepNames.simulation'), t('common.stepNames.report'), t('common.stepNames.interaction')])
+const currentStep = ref(1) // 1: Graph Building, 2: Environment Setup, 3: Start Simulation, 4: Report Generation, 5: Deep Interaction
+const stepNames = ['Graph Building', 'Environment Setup', 'Start Simulation', 'Report Generation', 'Deep Interaction']
 
 // Data State
 const currentProjectId = ref(route.params.projectId)
@@ -123,40 +104,6 @@ const currentPhase = ref(-1) // -1: Upload, 0: Ontology, 1: Build, 2: Complete
 const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const systemLogs = ref([])
-const logScrollArea = ref(null)
-
-/** User-visible error text; expands opaque API / KeyError messages */
-const formatClientError = (err) => {
-  if (!err) return 'Unknown error'
-  const raw = (err.message != null ? err.message : String(err)).trim()
-  const apiBody = err.response?.data
-  if (apiBody && typeof apiBody === 'object') {
-    const fromApi = apiBody.error ?? apiBody.message
-    if (fromApi != null && String(fromApi).trim()) {
-      return String(fromApi).trim()
-    }
-  }
-  const dequoted = raw.replace(/^['"]|['"]$/g, '')
-  if (dequoted === 'name') {
-    return (
-      'Ontology JSON from the model was missing a required "name" on an entity or relation type. ' +
-      'Retry generation; if it persists, check server logs or LLM output format.'
-    )
-  }
-  return raw || 'Unknown error'
-}
-
-watch(
-  () => systemLogs.value.length,
-  () => {
-    nextTick(() => {
-      const el = logScrollArea.value
-      if (el) {
-        el.scrollTop = el.scrollHeight
-      }
-    })
-  }
-)
 
 // Polling timers
 let pollTimer = null
@@ -212,11 +159,11 @@ const toggleMaximize = (target) => {
 const handleNextStep = (params = {}) => {
   if (currentStep.value < 5) {
     currentStep.value++
-    addLog(t('main.log.enterStep', { step: currentStep.value, name: stepNames.value[currentStep.value - 1] }))
+    addLog(`Entering Step ${currentStep.value}: ${stepNames[currentStep.value - 1]}`)
     
-    // 如果是从 Step 2 进入 Step 3，记录模拟轮数配置
+    // When moving from Step 2 to Step 3, log the round configuration
     if (currentStep.value === 3 && params.maxRounds) {
-      addLog(t('main.log.customRounds', { rounds: params.maxRounds }))
+      addLog(`Custom simulation rounds: ${params.maxRounds}`)
     }
   }
 }
@@ -224,7 +171,7 @@ const handleNextStep = (params = {}) => {
 const handleGoBack = () => {
   if (currentStep.value > 1) {
     currentStep.value--
-    addLog(t('main.log.backStep', { step: currentStep.value, name: stepNames.value[currentStep.value - 1] }))
+    addLog(`Returning to Step ${currentStep.value}: ${stepNames[currentStep.value - 1]}`)
   }
 }
 
@@ -268,18 +215,12 @@ const handleNewProject = async () => {
       addLog(`Ontology generated successfully for project ${res.data.project_id}`)
       await startBuildGraph()
     } else {
-      const msgText = res.error || res.message || 'Ontology generation failed'
-      error.value = msgText
-      addLog(`Error generating ontology: ${msgText}`)
-      currentPhase.value = -1
-      ontologyProgress.value = null
+      error.value = res.error || 'Ontology generation failed'
+      addLog(`Error generating ontology: ${error.value}`)
     }
   } catch (err) {
-    const detail = formatClientError(err)
-    error.value = detail
-    addLog(`Exception in handleNewProject: ${detail}`)
-    currentPhase.value = -1
-    ontologyProgress.value = null
+    error.value = err.message
+    addLog(`Exception in handleNewProject: ${err.message}`)
   } finally {
     loading.value = false
   }
@@ -595,77 +536,5 @@ onUnmounted(() => {
 
 .panel-wrapper.left {
   border-right: 1px solid #EAEAEA;
-}
-
-.panel-wrapper.right {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.right-panel-step1 {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background-color: #fafafa;
-}
-
-/* Direct child of .panel-wrapper.right: dashboard shell + scrollable lines */
-.log-content {
-  background: #000;
-  color: #ddd;
-  padding: 16px;
-  font-family: 'JetBrains Mono', monospace;
-  border-top: 1px solid #222;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.log-header {
-  display: flex;
-  justify-content: space-between;
-  border-bottom: 1px solid #333;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  font-size: 10px;
-  color: #888;
-}
-
-.log-scroll {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  height: 80px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.log-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-
-.log-scroll::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 2px;
-}
-
-.log-line {
-  font-size: 11px;
-  display: flex;
-  gap: 12px;
-  line-height: 1.5;
-}
-
-.log-time {
-  color: #666;
-  min-width: 75px;
-}
-
-.log-msg {
-  color: #ccc;
-  word-break: break-all;
 }
 </style>

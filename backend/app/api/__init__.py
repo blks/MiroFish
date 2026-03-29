@@ -1,6 +1,4 @@
-"""
-API路由模块
-"""
+"""API route modules."""
 
 from flask import Blueprint
 
