@@ -88,6 +88,17 @@ MESSAGES = {
         'en': 'ZEP_API_KEY not configured',
         'zh': 'ZEP_API_KEY未配置'
     },
+    'graph_backend_not_configured': {
+        'en': (
+            'Graph backend is not configured correctly. '
+            'For GRAPH_BACKEND=zep_cloud set ZEP_API_KEY; '
+            'for graphiti_local set NEO4J_* and related variables (see .env.example).'
+        ),
+        'zh': (
+            '图谱后端未正确配置。GRAPH_BACKEND=zep_cloud 时需配置 ZEP_API_KEY；'
+            'graphiti_local 时需配置 NEO4J 等变量（见 .env.example）。'
+        ),
+    },
     'entity_not_found': {
         'en': 'Entity not found: {id}',
         'zh': '实体不存在: {id}'

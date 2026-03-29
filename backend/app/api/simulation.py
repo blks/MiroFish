@@ -12,26 +12,25 @@ from ..services.simulation_manager import SimulationManager, SimulationStatus
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
 from ..utils.logger import get_logger
 from ..models.project import ProjectManager
+from ..utils.messages import msg, get_request_language
 
 logger = get_logger('mirofish.api.simulation')
 
 
+def get_interview_prefix(lang=None):
+    return msg('interview_prefix', lang=lang)
 
 
-INTERVIEW_PROMPT_PREFIX = (
-    "Based on your persona and all of your past memories and actions, "
-    "reply directly in plain text without calling any tools: "
-)
-
-
-def optimize_interview_prompt(prompt: str) -> str:
-    """Optimize interview prompt."""
+def optimize_interview_prompt(prompt: str, lang=None) -> str:
+    """Prefix interview prompts so agents reply in plain text without tools."""
     if not prompt:
         return prompt
-    
-    if prompt.startswith(INTERVIEW_PROMPT_PREFIX):
+    prefix = get_interview_prefix(lang=lang)
+    en_prefix = msg('interview_prefix', lang='en')
+    zh_prefix = msg('interview_prefix', lang='zh')
+    if prompt.startswith(en_prefix) or prompt.startswith(zh_prefix):
         return prompt
-    return f"{INTERVIEW_PROMPT_PREFIX}{prompt}"
+    return f"{prefix}{prompt}"
 
 
 
@@ -43,9 +42,9 @@ def get_graph_entities(graph_id: str):
         if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": "Graph backend is not configured correctly"
+                "error": msg('graph_backend_not_configured'),
             }), 500
-        
+
         entity_types_str = request.args.get('entity_types', '')
         entity_types = [t.strip() for t in entity_types_str.split(',') if t.strip()] if entity_types_str else None
         enrich = request.args.get('enrich', 'true').lower() == 'true'
@@ -80,16 +79,16 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
         if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": "Graph backend is not configured correctly"
+                "error": msg('graph_backend_not_configured'),
             }), 500
-        
+
         reader = ZepEntityReader()
         entity = reader.get_entity_with_context(graph_id, entity_uuid)
-        
+
         if not entity:
             return jsonify({
                 "success": False,
-                "error": f"Entity does not exist: {entity_uuid}"
+                "error": msg('entity_not_found', id=entity_uuid),
             }), 404
         
         return jsonify({
@@ -113,9 +112,9 @@ def get_entities_by_type(graph_id: str, entity_type: str):
         if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": "Graph backend is not configured correctly"
+                "error": msg('graph_backend_not_configured'),
             }), 500
-        
+
         enrich = request.args.get('enrich', 'true').lower() == 'true'
         
         reader = ZepEntityReader()
@@ -326,16 +325,16 @@ def prepare_simulation():
         if not simulation_id:
             return jsonify({
                 "success": False,
-                "error": "Please provide simulation_id"
+                "error": msg('missing_simulation_id'),
             }), 400
-        
+
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
-        
+
         if not state:
             return jsonify({
                 "success": False,
-                "error": f"Simulation does not exist: {simulation_id}"
+                "error": msg('simulation_not_found', id=simulation_id),
             }), 404
         
         
@@ -370,15 +369,14 @@ def prepare_simulation():
         if not project:
             return jsonify({
                 "success": False,
-                "error": f"Project does not exist: {state.project_id}"
+                "error": msg('project_not_found', id=state.project_id),
             }), 404
-        
-        
+
         simulation_requirement = project.simulation_requirement or ""
         if not simulation_requirement:
             return jsonify({
                 "success": False,
-                "error": "Project is missing simulation_requirement"
+                "error": msg('missing_simulation_requirement'),
             }), 400
         
         
@@ -387,9 +385,12 @@ def prepare_simulation():
         entity_types_list = data.get('entity_types')
         use_llm_for_profiles = data.get('use_llm_for_profiles', True)
         parallel_profile_count = data.get('parallel_profile_count', 5)
-        
-        
-        
+        prepare_language = get_request_language()
+        logger.info(
+            "prepare simulation language (Accept-Language): %s",
+            prepare_language,
+        )
+
         try:
             logger.info(f"Synchronously fetching entity count: graph_id={state.graph_id}")
             reader = ZepEntityReader()
@@ -425,7 +426,7 @@ def prepare_simulation():
         manager._save_simulation_state(state)
         
         
-        def run_prepare():
+        def run_prepare(lang=prepare_language):
             try:
                 task_manager.update_task(
                     task_id,
@@ -506,7 +507,8 @@ def prepare_simulation():
                     defined_entity_types=entity_types_list,
                     use_llm_for_profiles=use_llm_for_profiles,
                     progress_callback=progress_callback,
-                    parallel_profile_count=parallel_profile_count
+                    parallel_profile_count=parallel_profile_count,
+                    language=lang,
                 )
                 
                 
@@ -1182,10 +1184,14 @@ def generate_profiles():
                 "error": "No entities matched the requested filters"
             }), 400
         
-        generator = OasisProfileGenerator()
+        generator = OasisProfileGenerator(
+            graph_id=graph_id,
+            language=get_request_language(),
+        )
         profiles = generator.generate_profiles_from_entities(
             entities=filtered.entities,
-            use_llm=use_llm
+            use_llm=use_llm,
+            graph_id=graph_id,
         )
         
         if platform == "reddit":
@@ -1807,7 +1813,9 @@ def interview_agent():
             }), 400
         
         
-        optimized_prompt = optimize_interview_prompt(prompt)
+        optimized_prompt = optimize_interview_prompt(
+            prompt, lang=get_request_language()
+        )
         
         result = SimulationRunner.interview_agent(
             simulation_id=simulation_id,
@@ -1907,7 +1915,10 @@ def interview_agents_batch():
         optimized_interviews = []
         for interview in interviews:
             optimized_interview = interview.copy()
-            optimized_interview['prompt'] = optimize_interview_prompt(interview.get('prompt', ''))
+            optimized_interview['prompt'] = optimize_interview_prompt(
+                interview.get('prompt', ''),
+                lang=get_request_language(),
+            )
             optimized_interviews.append(optimized_interview)
 
         result = SimulationRunner.interview_agents_batch(
@@ -1984,7 +1995,9 @@ def interview_all_agents():
             }), 400
 
         
-        optimized_prompt = optimize_interview_prompt(prompt)
+        optimized_prompt = optimize_interview_prompt(
+            prompt, lang=get_request_language()
+        )
 
         result = SimulationRunner.interview_all_agents(
             simulation_id=simulation_id,

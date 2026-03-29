@@ -14,6 +14,7 @@ from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
+from ..utils.messages import msg
 
 
 logger = get_logger('mirofish.api')
@@ -506,9 +507,9 @@ def get_graph_data(graph_id: str):
         if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": "Graph backend is not configured correctly"
+                "error": msg('graph_backend_not_configured'),
             }), 500
-        
+
         builder = GraphBuilderService()
         graph_data = builder.get_graph_data(graph_id)
         
@@ -532,9 +533,9 @@ def delete_graph(graph_id: str):
         if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": "Graph backend is not configured correctly"
+                "error": msg('graph_backend_not_configured'),
             }), 500
-        
+
         builder = GraphBuilderService()
         builder.delete_graph(graph_id)
         
